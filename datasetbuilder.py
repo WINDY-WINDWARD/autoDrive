@@ -6,6 +6,9 @@ from mss import mss
 import keyboard
 from PIL import Image
 from datetime import datetime
+import cv2
+import numpy as np
+
 
 imagePath = "images"
 indexPath = "index.csv"
@@ -36,6 +39,42 @@ def get_key_stroke():
         actions+= "right+"
     return actions
 
+def getROI(image):
+    height = image.shape[0]
+    width = image.shape[1]
+    # Defining Triangular ROI: The values will change as per your camera mounts
+    triangle = np.array([[(50, height-20), (width-50, height-20), (width-115, 60), (115, 60)]])
+    # creating black image same as that of input image
+    black_image = np.zeros_like(image)
+    # Put the Triangular shape on top of our Black image to create a mask
+    mask = cv2.fillPoly(black_image, triangle, 255)
+    # applying mask on original image
+    masked_image = cv2.bitwise_and(image, mask)
+    return masked_image
+
+def canyEdgeDetector(image, threshold1, threshold2):
+    edged = cv2.Canny(image, threshold1, threshold2)
+    return edged
+
+def gaussianBlur(image):
+    return cv2.GaussianBlur(image, (5, 5), 0)
+
+def getLines(image, original_image):
+    lines = cv2.HoughLinesP(image,rho= 1,theta= np.pi/180,threshold= 30, minLineLength=20, maxLineGap=500)
+    if lines is not None:
+        for line in lines:
+            x1, y1, x2, y2 = line[0]
+            cv2.line(original_image, (x1, y1), (x2, y2), (0, 255, 0), 5)
+    return original_image
+
+def process_live(img):
+    img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    img = gaussianBlur(img)
+    img = canyEdgeDetector(img, 41, 150)
+    img = getROI(img)
+    return Image.fromarray(img)
+
+
 async def data_gatherer(acw, sct):
     global imgCount, key_log, last_action
     left, top = acw.topleft
@@ -43,8 +82,8 @@ async def data_gatherer(acw, sct):
     key = get_key_stroke()
     screenshot_path = f"{imagePath}/{imgCount}.png"
     screenshot = sct.grab({"left": left, "top": top, "width": right-left, "height": bottom-top})
-    image = Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
-    image = image.resize(imageSize)
+    image = cv2.resize(np.array(screenshot), imageSize)
+    image = process_live(image)
     image.save(screenshot_path)
     key_log.append(f"{imgCount}.png,{last_action},{key}\n")
     imgCount += 1
