@@ -7,40 +7,43 @@ from keras.models import load_model
 import pydirectinput
 import time
 import pygetwindow as gw
-import asyncio
+# import asyncio
 import os
-from mss.tools import to_png
+# from mss.tools import to_png
 from mss import mss
 import keyboard
 from PIL import Image
 import cv2
 from datetime import datetime
-from threading import Thread
-os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+# from threading import Thread
+import logging
+
+logging.basicConfig(level=logging.DEBUG)
+
+# os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
 
 
 # %%
 # load model
-model = load_model('car_driving_model.h5')
-# load label encoder class  
-label_encoder = LabelEncoder()
-label_encoder.classes_ = np.load('classes.npy', allow_pickle=True)
+model = load_model('alexnet.h5')
+logging.debug("model loaded")
 
 UpState = True
+mapping = { 0:'up',  1:'left',  2:'right',  3:'down'}
 
-# %%
+
 def predict_action(image):
+    logging.debug("predicting action")
     image = np.expand_dims(image, axis=0)
     prediction = model.predict(image)
-    predicted_class = label_encoder.inverse_transform([np.argmax(prediction)])
-    # print(type(predicted_class[0]))
-    return predicted_class[0]
+    return mapping[np.argmax(prediction)]
 
 
 
 # %%
 def getROI(image):
+    logging.debug("getting ROI")
     height = image.shape[0]
     width = image.shape[1]
     # Defining Triangular ROI: The values will change as per your camera mounts
@@ -54,26 +57,23 @@ def getROI(image):
     return masked_image
 
 def canyEdgeDetector(image, threshold1, threshold2):
+    logging.debug("applying canny edge detector")
     edged = cv2.Canny(image, threshold1, threshold2)
     return edged
 
 def gaussianBlur(image):
+    logging.debug("applying gaussian blur")
     return cv2.GaussianBlur(image, (5, 5), 0)
 
-def getLines(image, original_image):
-    lines = cv2.HoughLinesP(image,rho= 1,theta= np.pi/180,threshold= 30, minLineLength=20, maxLineGap=500)
-    if lines is not None:
-        for line in lines:
-            x1, y1, x2, y2 = line[0]
-            cv2.line(original_image, (x1, y1), (x2, y2), (0, 255, 0), 5)
-    return original_image
 
 def process_live(img):
+    logging.debug("processing live image")
     img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-    img = gaussianBlur(img)
-    img = canyEdgeDetector(img, 41, 150)
-    img = getROI(img)
-    return Image.fromarray(img)
+    # img = gaussianBlur(img)
+    # img = canyEdgeDetector(img, 41, 150)
+    # img = getROI(img)
+    logging.debug("image processed")
+    return img
 
 
 
@@ -88,6 +88,7 @@ key_log = []
 pauseFlag = False
 
 def cleanup():
+    logging.debug("cleaning up")
     if os.path.exists(imagePath):
         os.rename(imagePath, datetime.now().strftime('%Y-%m-%d_%H-%M-%S'))
     os.mkdir(imagePath)
@@ -97,8 +98,8 @@ def cleanup():
         f.write("image_name,last_action,action\n")
 
 def keyPresss(k):
+    logging.debug(f"pressing {k}")
     if k == "left" or k == "right":
-        print(f"pressing {k}")
         pydirectinput.keyDown(k)
         time.sleep(0.2)
         pydirectinput.keyUp(k)
@@ -109,39 +110,51 @@ def keyPresss(k):
     #     pydirectinput.keyUp(k)
 
 def send_key(key):
-    print(f"key: {key}")
-    if str(key) == "nan" or str(key) == "None" or str(key) == "" or str(key) == " " or str(key) == "no_action":
-        return
-    key = str(key).split("+")
-    if len(key) == 1:
-        keyPresss(key[0])
+    logging.debug(f"sending key {key}")
+    if key == "left":
+        pressing_left()
+    elif key == "right":
+        pressing_right()
+    elif key == "up":
+        pressing_up()
     else:
-        for k in key:
-            Thread(target=keyPresss, args=(k,)).start()
+        logging.debug("no key pressed")
+        pydirectinput.keyUp("up")
+        pydirectinput.keyUp("left")
+        pydirectinput.keyUp("right")
 
 def pressing_up():
-    global pauseFlag
-    while UpState:
-        if not pauseFlag and gw.getActiveWindow().title == "Need for Speed™ Most Wanted" and UpState:
-            # print("pressing upstarted")
-            pydirectinput.keyDown("up")
-        if pauseFlag or gw.getActiveWindow().title != "Need for Speed™ Most Wanted" and not UpState:
-            # print("pressing up stopped")
-            pydirectinput.keyUp("up")
+    logging.debug("pressing up")
+    pydirectinput.keyDown("up")
+    pydirectinput.keyUp("left")
+    pydirectinput.keyUp("right")
 
-        time.sleep(1)
+def pressing_left():
+    logging.debug("pressing left")
+    pydirectinput.keyDown("left")
+    # pydirectinput.keyUp("up")
+    pydirectinput.keyUp("right")
+
+def pressing_right():
+    logging.debug("pressing right")
+    pydirectinput.keyDown("right")
+    # pydirectinput.keyUp("up")
+    pydirectinput.keyUp("left")
+
+imageSize = (256,144)
 
 
-async def data_gatherer(acw, sct):
+def data_gatherer(acw, sct):
+    logging.debug("gathering data")
     global imgCount, key_log, last_action
     left, top = acw.topleft
     right, bottom = acw.bottomright
     screenshot_path = f"{imagePath}/{imgCount}.png"
     screenshot = sct.grab({"left": left, "top": top, "width": right-left, "height": bottom-top})
-    image = cv2.resize(np.array(screenshot), (256, 144))
-    image = process_live(image)
-
-    key = predict_action(img_to_array(image) / 255.0)
+    image = Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
+    image = image.resize(imageSize)
+    image = process_live(img_to_array(image))
+    key = predict_action(image / 255.0)
     # to_png(screenshot.rgb, screenshot.size, output=screenshot_path)
     # key_log.append(f"{imgCount}.png,{last_action},{key}\n")
     last_action = key
@@ -154,14 +167,13 @@ async def data_gatherer(acw, sct):
             f.writelines(key_log)
         key_log = []
 
-async def monitor_game():
+def monitor_game():
     global pauseFlag, UpState
-    upThread= Thread(target=pressing_up)
     # cleanup()
     try:
-        upThread.start()
         with mss() as sct:
             while True:
+                logging.debug("Starting the loop")
                 if keyboard.is_pressed('f3'):
                     print("exiting")
                     break
@@ -169,33 +181,32 @@ async def monitor_game():
                     pauseFlag = not pauseFlag
                     if pauseFlag:
                         print("pausing")
-                        await asyncio.sleep(1)
+                        time.sleep(1)
                     else:
                         print("resuming")
-                        await asyncio.sleep(1)
+                        time.sleep(1)
                 if pauseFlag:
-                    await asyncio.sleep(1)
+                    time.sleep(1)
                     continue
                 active_window = gw.getActiveWindow()
                 if active_window and active_window.title == "Need for Speed™ Most Wanted":
-                    await data_gatherer(active_window, sct)
+                    data_gatherer(active_window, sct)
                 else:
                     print("waiting for the game to be active")
-                    await asyncio.sleep(1)
+                    time.sleep(1)
     except Exception as e:
         print(e)
     finally:
-            if key_log:
-                with open("index.csv", "a") as f:
-                    f.writelines(key_log)
             pauseFlag = True
             UpState = False
-            upThread.join()
             pydirectinput.keyUp("up")
+            pydirectinput.keyUp("left")
+            pydirectinput.keyUp("right")
+            pydirectinput.keyUp("down")
             print("Completed Shutdown")
 
 
-
-asyncio.run(monitor_game())
+if __name__ == "__main__":
+    monitor_game()
 
 

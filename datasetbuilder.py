@@ -9,14 +9,15 @@ from datetime import datetime
 import cv2
 import numpy as np
 
-
-imagePath = "images"
-indexPath = "index.csv"
 imageSize = (256,144)
 imgCount = 0
 key_log = []
 pauseFlag = True
 last_action = "None"
+
+uniqueID = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+imagePath = uniqueID
+indexPath = f"{imagePath}.csv"
 
 def cleanup():
     if os.path.exists(imagePath):
@@ -27,78 +28,71 @@ def cleanup():
     with open(indexPath, "w") as f:
         f.write("image_name,last_action,action\n")
 
+# def get_key_stroke():
+#     actions =""
+#     if keyboard.is_pressed('up'):
+#         actions+="up+"
+#     if keyboard.is_pressed('down'):
+#         actions+="down+"
+#     if keyboard.is_pressed('left'):
+#         actions+= "left+"
+#     if keyboard.is_pressed('right'):
+#         actions+= "right+"
+#     return actions
+
 def get_key_stroke():
-    actions =""
+    actions = ""
     if keyboard.is_pressed('up'):
-        actions+="up+"
-    if keyboard.is_pressed('down'):
-        actions+="down+"
-    if keyboard.is_pressed('left'):
-        actions+= "left+"
-    if keyboard.is_pressed('right'):
-        actions+= "right+"
+        actions = "up"
+    elif keyboard.is_pressed('down'):
+        actions = "down"
+    elif keyboard.is_pressed('left'):
+        actions = "left"
+    elif keyboard.is_pressed('right'):
+        actions = "right"
+    else:
+        actions = "None"
     return actions
-
-def getROI(image):
-    height = image.shape[0]
-    width = image.shape[1]
-    # Defining Triangular ROI: The values will change as per your camera mounts
-    triangle = np.array([[(50, height-20), (width-50, height-20), (width-115, 60), (115, 60)]])
-    # creating black image same as that of input image
-    black_image = np.zeros_like(image)
-    # Put the Triangular shape on top of our Black image to create a mask
-    mask = cv2.fillPoly(black_image, triangle, 255)
-    # applying mask on original image
-    masked_image = cv2.bitwise_and(image, mask)
-    return masked_image
-
-def canyEdgeDetector(image, threshold1, threshold2):
-    edged = cv2.Canny(image, threshold1, threshold2)
-    return edged
-
-def gaussianBlur(image):
-    return cv2.GaussianBlur(image, (5, 5), 0)
-
-def getLines(image, original_image):
-    lines = cv2.HoughLinesP(image,rho= 1,theta= np.pi/180,threshold= 30, minLineLength=20, maxLineGap=500)
-    if lines is not None:
-        for line in lines:
-            x1, y1, x2, y2 = line[0]
-            cv2.line(original_image, (x1, y1), (x2, y2), (0, 255, 0), 5)
-    return original_image
-
-def process_live(img):
-    img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-    img = gaussianBlur(img)
-    img = canyEdgeDetector(img, 41, 150)
-    img = getROI(img)
-    return Image.fromarray(img)
 
 
 async def data_gatherer(acw, sct):
-    global imgCount, key_log, last_action
+    global imgCount, key_log, last_action, runcount
+    runcount += 1
     left, top = acw.topleft
     right, bottom = acw.bottomright
     key = get_key_stroke()
-    screenshot_path = f"{imagePath}/{imgCount}.png"
+    screenshot_path = f"{imagePath}/{imgCount}_{uniqueID}.png"
     screenshot = sct.grab({"left": left, "top": top, "width": right-left, "height": bottom-top})
-    image = cv2.resize(np.array(screenshot), imageSize)
-    image = process_live(image)
+    image= Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
+    image= image.resize(imageSize)
     image.save(screenshot_path)
-    key_log.append(f"{imgCount}.png,{last_action},{key}\n")
+    key_log.append(f"{imgCount}_{uniqueID}.png,{last_action},{key}\n")
     imgCount += 1
     last_action = key
-    if len(key_log) >= 100:
+    if len(key_log) >= 1000:
         with open(indexPath, "a") as f:
             f.writelines(key_log)
         key_log = []
 
+def fpsCounter():
+    global runcount,startTime,current_time
+    current_time = datetime.now()
+    elapsed = (current_time-startTime).total_seconds()
+    fps = runcount / elapsed
+    fps = round(fps,2)
+    print(f"FPS: {fps}")
+
+runcount = 0
+startTime = datetime.now()
+current_time = datetime.now()
 async def monitor_game():
-    global pauseFlag
+    global pauseFlag, runcount,current_time
     cleanup()
     try:
         with mss() as sct:
             while True:
+                if runcount % 1000 == 0:
+                    fpsCounter()
                 if keyboard.is_pressed('f3'):
                     print("exiting")
                     break
@@ -106,10 +100,12 @@ async def monitor_game():
                     pauseFlag = not pauseFlag
                     if pauseFlag:
                         print("pausing")
+                        await asyncio.sleep(1)
                     else:
                         print("resuming")
+                        await asyncio.sleep(1)
                 if pauseFlag:
-                    await asyncio.sleep(0.5)
+                    await asyncio.sleep(2)
                     continue
                 active_window = gw.getActiveWindow()
                 if active_window and active_window.title == "Need for Speed™ Most Wanted":
@@ -117,13 +113,14 @@ async def monitor_game():
                 else:
                     print("waiting for the game to be active")
                     await asyncio.sleep(1)
-                await asyncio.sleep(0.1)
     except Exception as e:
         print(e)
     finally:
             if key_log:
                 with open(indexPath, "a") as f:
                     f.writelines(key_log)
+            print(runcount)
+            print("total time:" + str((current_time-startTime).total_seconds()/60) )
 
 if __name__ == "__main__":
     asyncio.run(monitor_game())
