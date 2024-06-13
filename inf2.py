@@ -68,7 +68,7 @@ def gaussianBlur(image):
 
 def process_live(img):
     logging.debug("processing live image")
-    img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    img = cv2.cvtColor(img)
     # img = gaussianBlur(img)
     # img = canyEdgeDetector(img, 41, 150)
     # img = getROI(img)
@@ -153,8 +153,8 @@ def data_gatherer(acw, sct):
     screenshot = sct.grab({"left": left, "top": top, "width": right-left, "height": bottom-top})
     image = Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
     image = image.resize(imageSize)
-    image = process_live(img_to_array(image))
-    key = predict_action(image / 255.0)
+    # image = process_live(img_to_array(image))
+    key = predict_action(img_to_array(image) / 255.0)
     # to_png(screenshot.rgb, screenshot.size, output=screenshot_path)
     # key_log.append(f"{imgCount}.png,{last_action},{key}\n")
     last_action = key

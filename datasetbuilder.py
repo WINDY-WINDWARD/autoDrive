@@ -11,22 +11,34 @@ import numpy as np
 
 imageSize = (256,144)
 imgCount = 0
-key_log = []
+key_log = np.array([])
 pauseFlag = True
 last_action = "None"
-
 uniqueID = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
 imagePath = uniqueID
 indexPath = f"{imagePath}.csv"
 
-def cleanup():
-    if os.path.exists(imagePath):
-        os.rename(imagePath, datetime.now().strftime('%Y-%m-%d_%H-%M-%S'))
-    os.mkdir(imagePath)
-    if os.path.exists(indexPath):
-        os.rename(indexPath, datetime.now().strftime('%Y-%m-%d_%H-%M-%S.csv'))
-    with open(indexPath, "w") as f:
-        f.write("image_name,last_action,action\n")
+# def cleanup():
+#     if os.path.exists(imagePath):
+#         os.rename(imagePath, datetime.now().strftime('%Y-%m-%d_%H-%M-%S'))
+#     os.mkdir(imagePath)
+#     if os.path.exists(indexPath):
+#         os.rename(indexPath, datetime.now().strftime('%Y-%m-%d_%H-%M-%S.csv'))
+#     with open(indexPath, "w") as f:
+#         f.write("image_name,last_action,action\n")
+
+
+def saveNumpyArray():
+    global key_log
+    # check if the file exists
+    if os.path.exists(uniqueID + ".npy"):
+        # if it does, load the file and append the new data
+        data = np.load(uniqueID + ".npy")
+        data = np.append(data, key_log)
+        np.save(uniqueID + ".npy", data)
+    else:
+        # if it doesn't, create a new file
+        np.save(uniqueID + ".npy", key_log)
 
 # def get_key_stroke():
 #     actions =""
@@ -61,18 +73,18 @@ async def data_gatherer(acw, sct):
     left, top = acw.topleft
     right, bottom = acw.bottomright
     key = get_key_stroke()
-    screenshot_path = f"{imagePath}/{imgCount}_{uniqueID}.png"
     screenshot = sct.grab({"left": left, "top": top, "width": right-left, "height": bottom-top})
-    image= Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
-    image= image.resize(imageSize)
-    image.save(screenshot_path)
-    key_log.append(f"{imgCount}_{uniqueID}.png,{last_action},{key}\n")
+    # convert screenshot to cv2 image
+    img = np.array(screenshot)
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    img = cv2.resize(img, imageSize)
+    temp = np.array([img, last_action, key])
+    key_log = np.append(key_log, temp)
     imgCount += 1
     last_action = key
-    if len(key_log) >= 1000:
-        with open(indexPath, "a") as f:
-            f.writelines(key_log)
-        key_log = []
+    if key_log.size >= 1000:
+        # save numpy array as npy file
+        saveNumpyArray()
 
 def fpsCounter():
     global runcount,startTime,current_time
@@ -87,7 +99,7 @@ startTime = datetime.now()
 current_time = datetime.now()
 async def monitor_game():
     global pauseFlag, runcount,current_time
-    cleanup()
+    # cleanup()
     try:
         with mss() as sct:
             while True:
