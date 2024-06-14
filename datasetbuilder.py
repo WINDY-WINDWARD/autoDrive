@@ -4,41 +4,28 @@ import os
 from mss.tools import to_png
 from mss import mss
 import keyboard
-from PIL import Image
 from datetime import datetime
 import cv2
 import numpy as np
+import pandas as pd
 
 imageSize = (256,144)
-imgCount = 0
-key_log = np.array([])
+key_log = []
+img_log = []
 pauseFlag = True
 last_action = "None"
 uniqueID = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-imagePath = uniqueID
-indexPath = f"{imagePath}.csv"
-
-# def cleanup():
-#     if os.path.exists(imagePath):
-#         os.rename(imagePath, datetime.now().strftime('%Y-%m-%d_%H-%M-%S'))
-#     os.mkdir(imagePath)
-#     if os.path.exists(indexPath):
-#         os.rename(indexPath, datetime.now().strftime('%Y-%m-%d_%H-%M-%S.csv'))
-#     with open(indexPath, "w") as f:
-#         f.write("image_name,last_action,action\n")
 
 
-def saveNumpyArray():
-    global key_log
-    # check if the file exists
-    if os.path.exists(uniqueID + ".npy"):
-        # if it does, load the file and append the new data
-        data = np.load(uniqueID + ".npy")
-        data = np.append(data, key_log)
-        np.save(uniqueID + ".npy", data)
-    else:
-        # if it doesn't, create a new file
-        np.save(uniqueID + ".npy", key_log)
+def saveDataframe():
+    global key_log, img_log, uniqueID
+    # convert the logs to numpy arrays
+    key_log = np.array(key_log)
+    img_log = np.array(img_log)
+    print("saving data")
+    np.save(f"key_log_{uniqueID}.npy", key_log)
+    np.save(f"img_log_{uniqueID}.npy", img_log)
+
 
 # def get_key_stroke():
 #     actions =""
@@ -52,6 +39,16 @@ def saveNumpyArray():
 #         actions+= "right+"
 #     return actions
 
+
+def encode_action(action):
+    mapping = {'up': 0, 'left': 1, 'right': 2, 'down': 3}
+    if action == "None":
+        return np.zeros(4)
+    ac = mapping[action]
+    temp=np.zeros(4)
+    temp[ac]=1
+    return temp
+
 def get_key_stroke():
     actions = ""
     if keyboard.is_pressed('up'):
@@ -64,11 +61,12 @@ def get_key_stroke():
         actions = "right"
     else:
         actions = "None"
+    actions = encode_action(actions)
     return actions
 
 
 async def data_gatherer(acw, sct):
-    global imgCount, key_log, last_action, runcount
+    global key_log, img_log, runcount
     runcount += 1
     left, top = acw.topleft
     right, bottom = acw.bottomright
@@ -78,13 +76,11 @@ async def data_gatherer(acw, sct):
     img = np.array(screenshot)
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     img = cv2.resize(img, imageSize)
-    temp = np.array([img, last_action, key])
-    key_log = np.append(key_log, temp)
-    imgCount += 1
-    last_action = key
-    if key_log.size >= 1000:
-        # save numpy array as npy file
-        saveNumpyArray()
+    img_log.append(img)
+    key_log.append(key)
+    # save the data every 1000 frames
+    # if runcount % 1000 == 0:
+    #     saveDataframe()
 
 def fpsCounter():
     global runcount,startTime,current_time
@@ -126,11 +122,10 @@ async def monitor_game():
                     print("waiting for the game to be active")
                     await asyncio.sleep(1)
     except Exception as e:
+        print ("Error")
         print(e)
     finally:
-            if key_log:
-                with open(indexPath, "a") as f:
-                    f.writelines(key_log)
+            saveDataframe()
             print(runcount)
             print("total time:" + str((current_time-startTime).total_seconds()/60) )
 
